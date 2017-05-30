@@ -75,18 +75,20 @@ if platform == "linux" or platform == "linux2":
 	for configuration in psvr:
 		for interface in configuration:
 			ifnum = interface.bInterfaceNumber
-			reattach[ifnum] = True
-			if not psvr.is_kernel_driver_active(ifnum):
-				reattach[ifnum] = False
-				continue
-			try:
-				print("Detaching:")
-				#print("%s: %s\n" % (psvr, ifnum))
-				psvr.detach_kernel_driver(ifnum)
-			except usb.core.USBError as e:
-				pass
+			# Only Detach the Control interface
+			if ifnum == 5:
+				reattach[ifnum] = True
+				if not psvr.is_kernel_driver_active(ifnum):
+					reattach[ifnum] = False
+					continue
+				try:
+					print("Detaching: %s" % ifnum)
+					#print("%s: %s\n" % (psvr, ifnum))
+					psvr.detach_kernel_driver(ifnum)
+				except usb.core.USBError as e:
+					pass
 
-psvr.set_configuration()
+#psvr.set_configuration()
 cfg = psvr.get_active_configuration() 
 
 # Interface 5 -> Endpoint 0x4
@@ -271,9 +273,10 @@ else:
 # Clean up, and re-attach endpoints if they were previous attached
 usb.util.dispose_resources(psvr)
 
-for configuration in psvr:
-	for interface in configuration:
-		ifnum = interface.bInterfaceNumber
-		if (reattach[ifnum]):
-			print("Re-attaching:")
-			psvr.attach_kernel_driver(ifnum) 
+if platform == "linux" or platform == "linux2":
+	for configuration in psvr:
+		for interface in configuration:
+			ifnum = interface.bInterfaceNumber
+			if (reattach[ifnum]):
+				print("Re-attaching: %s" % ifnum)
+				psvr.attach_kernel_driver(ifnum)
