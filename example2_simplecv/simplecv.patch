@@ -1,0 +1,21 @@
+diff --git a/SimpleCV/Camera.py b/SimpleCV/Camera.py
+index fb799de..4ab66ab 100644
+--- a/SimpleCV/Camera.py
++++ b/SimpleCV/Camera.py
+@@ -190,6 +190,16 @@ class FrameSource:
+         """
+         return self._calibMat
+ 
++    def getDistCoeff(self):
++        """
++        **SUMMARY**
++
++        This function returns a cvMat of the camera's distortion_coefficient.
++        If there is no matrix defined the function returns None.
++
++        """
++        return self._distCoeff
++
+     def undistort(self, image_or_2darray):
+         """
+         **SUMMARY**
