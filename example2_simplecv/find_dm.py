@@ -7,6 +7,17 @@ from pydmtx import DataMatrix
 import numpy as np
 import pygame
 import cv2
+import argparse
+
+# Commandline options
+parser = argparse.ArgumentParser(prog='pyPSVR.py')
+
+parser.add_argument("-t", "--test", action="store_true", dest="test",
+    help="Test using the 'original.png' image" )
+parser.add_argument("-d", "--dump", action="store_true", dest="dump",
+    help="Dump the DMTX, computed subcorners to term" )
+
+options = parser.parse_args()
 
 # Predefined object = 50mm x 50mm datamatrix PDF
 # with extra point between 0th and 1st corner
@@ -16,27 +27,43 @@ objectPoints = np.array([[[-25, -25, 0], \
     [0, -25, 0]]], \
     dtype=np.float32) 
 
-cam = Camera()
-calibrated = cam.loadCalibration("default")
+if options.test == False:
+    cam = Camera(1)
+    calibrated = cam.loadCalibration("default")
+    image = cam.getImage()
+else:
+    print("Using 'original.png' for image source")
+    image = Image("original.png")
 
 if calibrated:
     camMatrix = np.array(cam.getCameraMatrix(), dtype=np.float32)
     # Note: This requires a patched SimpleCV
     distCoeff = np.array(cam.getDistCoeff(), dtype=np.float32)
 else:
-    camMatrix = np.eye(3)
+    focal_length = image.width
+    center = (image.width/2, image.height/2)
+    camMatrix = np.array(
+        [[focal_length, 0, center[0]],
+        [0, focal_length, center[1]],
+        [0, 0, 1]], dtype = "double"
+        )
     distCoeff = np.zeros((5,1))
 
 display = Display()
 
+# Timeout after 100ms, or after finding 1 'square' barcode
 dm_read = DataMatrix( timeout=100, max_count=1, shape=1 )
 
 while display.isNotDone():
-    if calibrated:
-        image_orig = cam.getImage()
-        image = cam.undistort(image_orig)
+    if options.test:
+        # re-read image
+        image = Image("original.png")
     else:
-        image = cam.getImage()
+        if calibrated:
+            image_orig = cam.getImage()
+            image = cam.undistort(image_orig)
+        else:
+             image = cam.getImage()
 
     overlay = DrawingLayer((image.width, image.height))
 
@@ -44,7 +71,6 @@ while display.isNotDone():
 
     for count in range(dm_read.count()):
         stats = dm_read.stats(count+1)
-        #print(stats)
 
         # Highlight barcode
         arrow = []
