@@ -27,6 +27,7 @@ objectPoints = np.array([[[-25, -25, 0], \
     [0, -25, 0]]], \
     dtype=np.float32) 
 
+calibrated = 0
 if options.test == False:
     cam = Camera(1)
     calibrated = cam.loadCalibration("default")
@@ -106,22 +107,34 @@ while display.isNotDone():
                     if dist[test] == np.min(dist):
                         overlay.circle(((corners[test].x * zoomed / 32) + (x*zoomed*1.1), \
                             (corners[test].y * zoomed / 32)), 10, Color.RED)
-                        best.append((corners[test].x + arrow[x][0]-16, \
-                            corners[test].y + arrow[x][1]-16))
+
+                        # optimise further (note: corner_S_, tuple of tuples!)
+                        gray = cv.CreateMat(32, 32, cv.CV_8UC1)
+                        cv.CvtColor(temp.getMatrix(), gray, cv.CV_RGB2GRAY)
+
+                        subcorner = cv.FindCornerSubPix(gray, \
+                            ((corners[test].x, corners[test].y),), (6,6), (-1,-1), \
+                            (cv.CV_TERMCRIT_EPS + cv.CV_TERMCRIT_ITER, 10, 0.1))
+
+                        best.append((subcorner[0][0] + arrow[x][0]-16, \
+                            subcorner[0][1] + arrow[x][1]-16))
                         break
 
         if len(best) == 3:
             imagePoints = np.array([best], dtype=np.float32)
-            #print([arrow[:3]], best)
+            if options.dump:
+                print([arrow[:3]], best)
         else:
-            # fall back to libdmtx corners
+            # fall back to libDMTX corners
             imagePoints = np.array([arrow[:3]], dtype=np.float32)
+            if options.dump:
+                print([arrow[:3]])
 
         # Add extra 'fake' point to prevent 'flips' and keep solvePnP happy
         imagePoints = np.append(imagePoints, imagePoints[0][0:2].mean(axis=0)).reshape(1,4,2)
 
         good, rVec, tVec = cv2.solvePnP(objectPoints, imagePoints, \
-            camMatrix, distCoeff)
+            camMatrix, distCoeff, flags=cv2.CV_ITERATIVE)
 
         if good:
             overlay.text("tVec: %.3f, %.3f, %.3f" % (tVec[0][0], tVec[1][0], tVec[2][0]), \
