@@ -34,6 +34,9 @@ objectPoints = np.array([[[-25, -25, 0], \
     [0, -25, 0]]], \
     dtype=np.float32) 
 
+rVec = None
+tVec = None
+iterate = False
 calibrated = 0
 if options.test == False or options.cal:
     cam = Camera(options.cam)
@@ -150,9 +153,10 @@ while display.isNotDone():
             print(imagePoints)
 
         good, rVec, tVec = cv2.solvePnP(objectPoints, imagePoints, \
-            camMatrix, distCoeff, flags=cv2.CV_ITERATIVE)
+            camMatrix, distCoeff, rVec, tVec, iterate, cv2.CV_ITERATIVE)
 
         if good:
+            iterate = True
             overlay.text("tVec: %.3f, %.3f, %.3f" % (tVec[0][0], tVec[1][0], tVec[2][0]), \
                 (10, image.height - 20), Color.RED)
             if options.dump:
@@ -177,6 +181,17 @@ while display.isNotDone():
             arrow.append(stats[1][0])
             arrow.append(point2D[0][0])
             overlay.lines(arrow, Color.GREEN, width=4)
+        else:
+            # Clear iteration if SolvePNP is 'bad'
+            rVec = None
+            tVec = None
+            iterate = False
+
+    # Clear iteration if no barcode found
+    if dm_read.count() == 0:
+        rVec = None
+        tVec = None
+        iterate = False
 
     if( pygame.key.get_pressed()[pygame.K_SPACE] != 0 ):
         image.save("original.png")
@@ -190,3 +205,8 @@ while display.isNotDone():
 
     if( pygame.key.get_pressed()[pygame.K_ESCAPE] != 0 ):
         break
+
+    if( pygame.key.get_pressed()[pygame.K_r] != 0 ):
+        rVec = None
+        tVec = None
+        iterate = False
