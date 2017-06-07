@@ -28,13 +28,15 @@ parser.add_argument("-d", "--dump", action="store_true", dest="dump",
 
 options = parser.parse_args()
 
+# 29mm squares on calibration sheet
+scale = 29.28
+
 # Predefined object = 50mm x 50mm datamatrix PDF
-# with extra point between 0th and 1st corner
-objectPoints = np.array([[[-25, -25, 0], \
-    [25, -25, 0], \
-    [-25, 25, 0], \
-    [0, -25, 0]]], \
-    dtype=np.float32) 
+objectPoints = np.array([[[25, -25, 0], \
+    [-25, -25, 0], \
+    [25, 25, 0], \
+    [25, -25, 0]]], \
+    dtype=np.float32) / scale
 
 rVec = None
 tVec = None
@@ -157,7 +159,8 @@ while display.isNotDone():
                 print([arrow[:3]])
 
         # Add extra 'fake' point to prevent 'flips' and keep solvePnP happy
-        imagePoints = np.append(imagePoints, imagePoints[0][0:2].mean(axis=0)).reshape(1,4,2)
+        imagePoints = np.append(imagePoints, imagePoints[0][0]).reshape(1,4,2)
+        #imagePoints = np.append(imagePoints, imagePoints[0][0:2].mean(axis=0)).reshape(1,4,2)
         if options.dump:
             print(imagePoints)
 
@@ -171,6 +174,13 @@ while display.isNotDone():
             if options.dump:
                 print("tVec %.3f, %.3f, %.3f" % (tVec[0][0], tVec[1][0], tVec[2][0]))
 
+            # Can not be 'behind' barcode
+            if tVec[2][0] < 0:
+                rVec = None
+                tVec = None
+                iterate = False
+                continue
+
             dst, jacobian = cv2.Rodrigues(rVec)
             x = tVec[0][0]
             y = tVec[2][0]
@@ -183,12 +193,27 @@ while display.isNotDone():
                 (image.width/2, image.height - 20), Color.RED)
 
             # Project a 3D point (-25.0, -25.0, 50.0) onto the image plane.
-            (point2D, jacobian) = cv2.projectPoints(np.array([(-25.0, -25.0, 50.0)]), \
+            (point2D, jacobian) = cv2.projectPoints(np.array([(25, -25, -50)])/scale, \
                 rVec, tVec, camMatrix, distCoeff)
  
             arrow = []
             arrow.append(stats[1][0])
             arrow.append(point2D[0][0])
+
+            # Add a box in front of barcode
+            (point2D, jacobian) = cv2.projectPoints(np.array([(-25, -25, -50)])/scale, \
+                rVec, tVec, camMatrix, distCoeff)
+            arrow.append(point2D[0][0])
+            (point2D, jacobian) = cv2.projectPoints(np.array([(-25, 25, -50)])/scale, \
+                rVec, tVec, camMatrix, distCoeff)
+            arrow.append(point2D[0][0])
+            (point2D, jacobian) = cv2.projectPoints(np.array([(25, 25, -50)])/scale, \
+                rVec, tVec, camMatrix, distCoeff)
+            arrow.append(point2D[0][0])
+            (point2D, jacobian) = cv2.projectPoints(np.array([(25, -25, -50)])/scale, \
+                rVec, tVec, camMatrix, distCoeff)
+            arrow.append(point2D[0][0])
+
             overlay.lines(arrow, Color.GREEN, width=4)
         else:
             # Clear iteration if SolvePNP is 'bad'
