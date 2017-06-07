@@ -12,6 +12,13 @@ import argparse
 # Commandline options
 parser = argparse.ArgumentParser(prog='pyPSVR.py')
 
+parser.add_argument("-c", "--cam", type=int, dest="cam", default=0,
+    help="Specify which camera to use")
+parser.add_argument("-C", "--cal", type=str, dest="cal", default=0,
+    help="Calibration file prefix")
+parser.add_argument("-D", "--dmtx", action="store_true", dest="dmtx",
+    help="Only used the DMTX corners" )
+
 parser.add_argument("-t", "--test", action="store_true", dest="test",
     help="Test using the 'original.png' image" )
 parser.add_argument("-d", "--dump", action="store_true", dest="dump",
@@ -28,11 +35,15 @@ objectPoints = np.array([[[-25, -25, 0], \
     dtype=np.float32) 
 
 calibrated = 0
-if options.test == False:
-    cam = Camera(1)
-    calibrated = cam.loadCalibration("default")
+if options.test == False or options.cal:
+    cam = Camera(options.cam)
+    if options.cal:
+        calibrated = cam.loadCalibration(options.cal)
+    else:
+        calibrated = cam.loadCalibration("default")
     image = cam.getImage()
-else:
+
+if options.test:
     print("Using 'original.png' for image source")
     image = Image("original.png")
 
@@ -86,6 +97,9 @@ while display.isNotDone():
         best = []
         zoomed = 64
         for x in range(3):
+            if options.dmtx:
+                break
+
             # abort if corner too close to image edge
             if arrow[x][0] < 16 or arrow[x][0] > (image.width - 16) or \
 		arrow[x][1] < 16 or arrow[x][1] > (image.height - 16):
@@ -132,6 +146,8 @@ while display.isNotDone():
 
         # Add extra 'fake' point to prevent 'flips' and keep solvePnP happy
         imagePoints = np.append(imagePoints, imagePoints[0][0:2].mean(axis=0)).reshape(1,4,2)
+        if options.dump:
+            print(imagePoints)
 
         good, rVec, tVec = cv2.solvePnP(objectPoints, imagePoints, \
             camMatrix, distCoeff, flags=cv2.CV_ITERATIVE)
@@ -139,7 +155,8 @@ while display.isNotDone():
         if good:
             overlay.text("tVec: %.3f, %.3f, %.3f" % (tVec[0][0], tVec[1][0], tVec[2][0]), \
                 (10, image.height - 20), Color.RED)
-            #print("%.3f, %.3f, %.3f" % (tVec[0][0], tVec[1][0], tVec[2][0]))
+            if options.dump:
+                print("tVec %.3f, %.3f, %.3f" % (tVec[0][0], tVec[1][0], tVec[2][0]))
 
             dst, jacobian = cv2.Rodrigues(rVec)
             x = tVec[0][0]
