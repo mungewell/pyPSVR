@@ -16,6 +16,8 @@ parser.add_argument("-c", "--cam", type=int, dest="cam", default=0,
     help="Specify which camera to use")
 parser.add_argument("-C", "--cal", type=str, dest="cal", default=0,
     help="Calibration file prefix")
+parser.add_argument("-n", "--nocal", action="store_true", dest="nocal",
+    help="Do not use calibrated camMatrix and distCoeff")
 parser.add_argument("-D", "--dmtx", action="store_true", dest="dmtx",
     help="Only used the DMTX corners" )
 
@@ -50,11 +52,14 @@ if options.test:
     print("Using 'original.png' for image source")
     image = Image("original.png")
 
-if calibrated:
+if calibrated and options.nocal == 0:
     camMatrix = np.array(cam.getCameraMatrix(), dtype=np.float32)
     # Note: This requires a patched SimpleCV
-    distCoeff = np.array(cam.getDistCoeff(), dtype=np.float32)
+    #distCoeff = np.array(cam.getDistCoeff(), dtype=np.float32)
+    distCoeff = np.zeros((5,1))
 else:
+    print("No calibration")
+    calibrated = 0
     focal_length = image.width
     center = (image.width/2, image.height/2)
     camMatrix = np.array(
@@ -63,6 +68,10 @@ else:
         [0, 0, 1]], dtype = "double"
         )
     distCoeff = np.zeros((5,1))
+
+if options.dump:
+    print(camMatrix)
+    print(distCoeff)
 
 display = Display()
 
