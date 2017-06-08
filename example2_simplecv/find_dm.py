@@ -57,8 +57,8 @@ if options.test:
 if calibrated and options.nocal == 0:
     camMatrix = np.array(cam.getCameraMatrix(), dtype=np.float32)
     # Note: This requires a patched SimpleCV
-    #distCoeff = np.array(cam.getDistCoeff(), dtype=np.float32)
-    distCoeff = np.zeros((5,1))
+    distCoeff = np.array(cam.getDistCoeff(), dtype=np.float32)
+    #distCoeff = np.zeros((5,1))
 else:
     print("No calibration")
     calibrated = 0
