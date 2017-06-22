@@ -9,12 +9,28 @@
 
 from construct import *
 
+# http://zeromq.org
+# ZeroMQ-4.0.4-miru1.0-x86.exe
+#
+# https://www.nico-maas.de/?p=1081
+# https://github.com/zeromq/pyzmq
+# pyzmq-16.0.2.zip
+
 import zmq
+
+# http://libsdl.org/
+# SDL2-2.0.5-win32-x64.zip
+#
+# https://pysdl2.readthedocs.io/en/rel_0_9_5/
+# https://github.com/syntonym/pysdl2
+# pysdl2-master.zip
+
+import sdl2
+
 import time
 from math import radians
 from pyrr import Quaternion, Matrix44, Vector3
 import numpy as np
-import sdl2
 
 addr = 'tcp://localhost:38219'
 
@@ -64,10 +80,20 @@ answer = master.recv_json()
 
 master.send_json({ "RequestedEndpointName":"HeadTracking", "ProtocolVersion":1, "Code":1 })
 answer = master.recv_json()
+
+if answer['ProtocolVersion'] != 2 or answer['Code'] != 0:
+	print("HeadTracking: incompatible protocol, or not available")
+	exit(0)
+
 headset_addr = answer['EndpointAddress']
 
 master.send_json({ "RequestedEndpointName":"Controller", "ProtocolVersion":1, "Code":1 })
 answer = master.recv_json()
+
+if answer['ProtocolVersion'] != 2 or answer['Code'] != 0:
+	print("Controller: incompatible protocol, or not available")
+	exit(0)
+
 controller_addr = answer['EndpointAddress']
 
 print("Found:")
@@ -99,17 +125,21 @@ controller_packet = Struct(
 headset = ctx.socket(zmq.REQ)
 headset.connect(headset_addr)
 
-# SendRadRotationAndPosition
-head_packet = Struct(
+head_SendRadRotationAndPosition = Struct(
 	Const(Int32ul, 2),		# Version
 	Padded(4, Const(Byte, 3)),	# SendRadRotationAndPosition
 	Const(Int32ul, 24),		# DataLength
-	"data" / Padded(64, Array(6, Float32l)),
+	"rotation" / Array(3, Float32l),
+	"position" / Array(3, Float32l),
+	Padding(40),
 )
 
 # -------------------------------
 # position view point
-output = head_packet.build(dict(data=[radians(0),radians(0),radians(0),0,2,0]))
+output = head_SendRadRotationAndPosition.build(dict(
+		rotation=[radians(0),radians(0),radians(0)],
+		position=[0,2,0]
+		))
 headset.send(output)
 answer = headset.recv()
 
@@ -132,7 +162,7 @@ while True:
 	sdl2.SDL_PumpEvents()
 
 	# Controller assignments:
-	# Controller1 (left)
+	# Controller1 (right)
 	# SDL_CONTROLLER_AXIS_RIGHTX
 	# SDL_CONTROLLER_AXIS_RIGHTY
 	# SDL_CONTROLLER_BUTTON_RIGHTSTICK
