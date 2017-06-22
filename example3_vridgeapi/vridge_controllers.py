@@ -111,7 +111,7 @@ controller_packet = Struct(
 	Padded(2, Const(Byte, 0)),	# ControllerOrigin
 
 	"id" / Int32ul,			# ControllerId
-	Const(Int32ul, 0),		# Status
+	"status" / Int32ul,		# Status
 	"orient" / Array(16, Float32l),	# OrientationMatrix
 	"count" / Int32ul,		# PacketNum
 
@@ -146,17 +146,19 @@ answer = headset.recv()
 last = 0
 count = 0
 
-left_moved = None
+left_visible = time.time()
 left_pitch = 0
 left_yaw = 0
 left_trigger = 0
 left_buttons = 0
+left_touched = 0
 
-right_moved = None
+right_visible = time.time()
 right_pitch = 0
 right_yaw = 0
 right_trigger = 0
 right_buttons = 0
+right_touched = 0
 
 while True:
 	sdl2.SDL_PumpEvents()
@@ -186,12 +188,25 @@ while True:
 	right_pitch = sdl2.SDL_GameControllerGetAxis(gamecontroller, sdl2.SDL_CONTROLLER_AXIS_RIGHTY)
 	right_yaw = sdl2.SDL_GameControllerGetAxis(gamecontroller, sdl2.SDL_CONTROLLER_AXIS_RIGHTX)
 	right_trigger = sdl2.SDL_GameControllerGetAxis(gamecontroller, sdl2.SDL_CONTROLLER_AXIS_TRIGGERRIGHT)
-	if right_trigger > 327:
+
+	if right_trigger > 3276: # 10% depressed
+		right_touched |= (1<<33) # Axis1
+	else:
+		right_touched &= ~(1<<33)
+	if right_trigger > 16384: # 50% depressed
 		right_buttons |= (1<<33) # Axis1
 	else:
 		right_buttons &= ~(1<<33)
 
-	# Contoller2 (right)
+	# Make a controller visible only for 15 seconds after movement/button press
+	if right_touched or right_buttons or abs(right_pitch) > 3276 or abs(right_yaw) > 3276:
+		right_visible = time.time()
+
+	if right_visible:
+		if (right_visible + 15) < time.time():
+			right_visible = None
+
+	# Controller2 (left)
 	# SDL_CONTROLLER_AXIS_LEFTX
 	# SDL_CONTROLLER_AXIS_LEFTY
 	# SDL_CONTROLLER_BUTTON_LEFTSTICK
@@ -201,7 +216,6 @@ while True:
 
 	if sdl2.SDL_GameControllerGetButton(gamecontroller, sdl2.SDL_CONTROLLER_BUTTON_LEFTSTICK):
 		left_buttons |= (1<<0) # System
-	else:
 		left_buttons &= ~(1<<0)
 	if sdl2.SDL_GameControllerGetButton(gamecontroller, sdl2.SDL_CONTROLLER_BUTTON_GUIDE):
 		left_buttons |= (1<<1) # Menu
@@ -211,14 +225,26 @@ while True:
 		left_buttons |= (1<<2) # Grip
 	else:
 		left_buttons &= ~(1<<2)
-
 	left_pitch = sdl2.SDL_GameControllerGetAxis(gamecontroller, sdl2.SDL_CONTROLLER_AXIS_LEFTY)
 	left_yaw = sdl2.SDL_GameControllerGetAxis(gamecontroller, sdl2.SDL_CONTROLLER_AXIS_LEFTX)
 	left_trigger = sdl2.SDL_GameControllerGetAxis(gamecontroller, sdl2.SDL_CONTROLLER_AXIS_TRIGGERLEFT)
-	if left_trigger > 327:
+
+	if left_trigger > 3276: # 10% depressed
+		left_touched |= (1<<33) # Axis1
+	else:
+		left_touched &= ~(1<<33)
+	if left_trigger > 16384: # 50% depressed
 		left_buttons |= (1<<33) # Axis1
 	else:
 		left_buttons &= ~(1<<33)
+
+	# Make a controller visible only for 15 seconds after movement/button press
+	if left_touched or left_buttons or abs(left_pitch) > 3276 or abs(left_yaw) > 3276:
+		left_visible = time.time()
+
+	if left_visible:
+		if (left_visible + 15) < time.time():
+			left_visible = None
 
 	# Unused...
 	# SDL_CONTROLLER_BUTTON_A
@@ -240,10 +266,11 @@ while True:
 
 	controller1 = controller_packet.build(dict(
 		id = 1,
+		status = 0 if right_visible else 1,
 		orient = matrix1.transpose().reshape(16).tolist(),
 		count = count,
 		pressed = right_buttons,
-		touched = right_buttons,
+		touched = right_touched,
 		axis = [0, 0, (right_trigger/32768)]
 		))
 	controller.send(controller1)
@@ -257,15 +284,17 @@ while True:
 
 	controller2 = controller_packet.build(dict(
 		id = 2,
+		status = 0 if left_visible else 1,
 		orient = matrix2.transpose().reshape(16).tolist(),
 		count = count,
 		pressed = left_buttons,
-		touched = left_buttons,
+		touched = left_touched,
 		axis = [0, 0, (left_trigger/32768)]
 		))
 	controller.send(controller2)
 	answer = controller.recv()
 
+	# Packet counter
 	count = count + 1
 	time.sleep(0.1)
 
