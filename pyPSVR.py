@@ -88,7 +88,9 @@ if platform == "linux" or platform == "linux2":
 				except usb.core.USBError as e:
 					pass
 
-#psvr.set_configuration()
+if platform == "win32":
+	psvr.set_configuration()
+
 cfg = psvr.get_active_configuration() 
 
 # Interface 5 -> Endpoint 0x4
