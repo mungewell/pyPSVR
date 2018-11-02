@@ -61,6 +61,9 @@ parser.add_argument("-G", "--reg", type=int, dest="reg",
 parser.add_argument("-R", "--read", action="store_true", dest="read",
 	help="After writing command, listen for responses" )
 
+parser.add_argument("-t", "--test", type=int, dest="test",
+	help="test variable" )
+
 options = parser.parse_args()
 
 # ------------------
@@ -111,14 +114,16 @@ rp = usb.util.find_descriptor(intf,custom_match = \
 
 if ep:
 	# Known Commands:
-	# Cmd 0x11, 0x13, 0x15, 0x17, 0x21, 0x23, 0x81
+	# Cmd 0x11, 0x13, 0x15, 0x17, 0x1b, 0x21, 0x23, 0x81
 
 	# Shutdown PSVR, requires button press on chord to turn on again
 	if options.shutdown:
 		ep.write(b'\x13\x00\xaa\x04\x01\x00\x00\x00')
+	'''
 	else:
 		# This seems to help prevent missed commands - reset parser?
 		ep.write(b'\x13\x00\xaa\x04\x00\x00\x00\x00')
+	'''
 
 	# Headset on/off, Processing Unit stays on
 	if options.on:
@@ -141,10 +146,14 @@ if ep:
 			ep.write(b'\x11\x00\xaa\x08\x02\x01\x03\x11\x00\x00\x00\x00')
 		else:
 			ep.write(b'\x11\x00\xaa\x08\x02\x00\x03\x11\x00\x00\x00\x00')
+			#ep.write(b'\x11\x00\xaa\x08\x03\x00\x03\x11\x00\x00\x00\x00')
 
+	'''
 	# Prevent a shutdown
 	# seen if 2 commands are sent too quickly
-	time.sleep(1)
+	if options.vrmode or options.cinemode:
+		time.sleep(1)
+	'''
 
 	# Set LED brightness
 	if options.ledval or options.lednum:
@@ -176,8 +185,8 @@ if ep:
 			or options.bright or options.hdmi:
 		# Limit size/dist/etc
 		if options.size:
-			if options.size > 80:
-				options.size = 80
+			if options.size > 100:
+				options.size = 100
 			if options.size < 26:
 				options.size = 26
 		else:
@@ -192,8 +201,8 @@ if ep:
 			options.dist=35
 
 		if options.mist:
-			if options.mist > 255:
-				options.mist = 255
+			if options.mist > 40: # no 'bad value', but ignores if greater
+				options.mist = 40
 			if options.mist < 1:
 				options.mist = 1
 		else:
@@ -205,7 +214,7 @@ if ep:
 			if options.bright < 1:
 				options.bright = 1
 		else:
-			options.bright=32
+			options.bright=20
 
 		if options.hdmi:
 			if options.hdmi > 4:
@@ -216,9 +225,9 @@ if ep:
 			options.hdmi=0
 
 		if options.lock:
-			lock = 0x80
+			lock = 0x00
 		else:
-			lock = 0xc0
+			lock = 0x40
 
 		if options.size:
 			ep.write(b'\x21\x00\xaa\x10' + \
@@ -228,6 +237,17 @@ if ep:
 
 	if options.recenter:
 		ep.write(b'\x1b\x00\xaa\x04\x00\x00\x00\x00')
+
+	if options.test:
+		# Seems to affect the mode in report 0xf0, but don't know what else
+		# forces VR->Cine without gamepad icon
+		# -t   8 -> 0x00,0x12
+		# -t  16 -> 0x00,0x12
+		# -t  32 -> 0x00,0x12
+		# -t  64 -> 0x08,0x12
+		# -t 128 -> 0x10,0x12
+		# -t 192 -> 0x18,0x12
+		ep.write(b'\x23\x00\xaa\x04' + bytearray([options.test]) + '\x00\x00\x00')
 
 	if options.read:
 		response = 0
@@ -266,7 +286,7 @@ if ep:
 				print(binascii.hexlify(data[0:16])) #, binascii.b2a_qp(data[0:16])
 				data = data[16:]
 			if data:
-				print(binascii.hexlify(data))#, binascii.b2a_qp(data)
+				print(binascii.hexlify(data)) #, binascii.b2a_qp(data)
 			print("-")
 			response = response + 1
 else:
