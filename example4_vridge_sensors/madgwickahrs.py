@@ -73,8 +73,8 @@ class MadgwickAHRS:
 
         # Gradient descent algorithm corrective step
         f = np.array([
-            2*(q[1]*q[3] - q[0]*q[2]) - accelerometer[0],
-            2*(q[0]*q[1] + q[2]*q[3]) - accelerometer[1],
+            2*(q[1]*q[3] - q[0]*q[2]) - accelerometer[1],
+            2*(q[0]*q[1] + q[2]*q[3]) - accelerometer[0],
             2*(0.5 - q[1]**2 - q[2]**2) - accelerometer[2],
             2*b[1]*(0.5 - q[2]**2 - q[3]**2) + 2*b[3]*(q[1]*q[3] - q[0]*q[2]) - magnetometer[0],
             2*b[1]*(q[1]*q[2] - q[0]*q[3]) + 2*b[3]*(q[0]*q[1] + q[2]*q[3]) - magnetometer[1],
@@ -121,8 +121,8 @@ class MadgwickAHRS:
 
         # Gradient descent algorithm corrective step
         f = np.array([
-            2*(q[1]*q[3] - q[0]*q[2]) - accelerometer[0],
-            2*(q[0]*q[1] + q[2]*q[3]) - accelerometer[1],
+            2*(q[1]*q[3] - q[0]*q[2]) - accelerometer[1],
+            2*(q[0]*q[1] + q[2]*q[3]) - accelerometer[0],
             2*(0.5 - q[1]**2 - q[2]**2) - accelerometer[2]
         ])
         j = np.array([
@@ -134,7 +134,7 @@ class MadgwickAHRS:
         step /= norm(step)  # normalise step magnitude
 
         # Compute rate of change of quaternion
-        qdot = (q * Quaternion(0, gyroscope[0], gyroscope[1], gyroscope[2])) * 0.5 - self.beta * step.T
+        qdot = (q * Quaternion(0, gyroscope[1], gyroscope[0], gyroscope[2])) * 0.5 - self.beta * step.T
 
         # Integrate to yield quaternion
         q += qdot * samplePeriod
