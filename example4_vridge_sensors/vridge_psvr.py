@@ -7,6 +7,9 @@
 # and send to VRidge via API.
 
 import argparse
+from sys import version_info
+if version_info[0] < 3:
+	import six
 
 from construct import *
 import numpy as np
@@ -17,9 +20,6 @@ import zmq
 from quaternion import Quaternion
 from madgwickahrs import MadgwickAHRS
 
-from sys import version_info
-if version_info[0] < 3:
-	import six
 
 # Commandline options
 parser = argparse.ArgumentParser(prog='vridge_psvr.py')
@@ -30,6 +30,9 @@ parser.add_argument("-S", "--sim", action="store_true", dest="sim",
 	help="Simuluate the PSVR" )
 parser.add_argument("-D", "--debug", action="store_true", dest="debug",
 	help="Output extra Debug" )
+
+parser.add_argument("-s", "--server", dest="server", default="localhost",
+	help="Use particular server (instead of localhost)" )
 
 options = parser.parse_args()
 
@@ -48,9 +51,12 @@ sensor = Struct(
    "acc" / Array(3, Int16sl),  # only 12bits used, >> 4
 )
 
-ACC_FACTOR = np.array((-1, -1, 1))
-GYRO_FACTOR = np.array((-1, 1, -1)) * ((1998.0/(1<<15)) * (np.pi/180.0))
+ACC_FACTOR = np.array((1, -1, 1))
+GYRO_FACTOR = np.array((1, 1, -1)) * ((1998.0/(1<<15)) * (np.pi/180.0))
+
 Sensor = None
+position = (0,0,0)
+gcomp = np.array((0,0,0))
 time2 = 0
 
 # -------------------------------
@@ -82,9 +88,8 @@ if options.debug:
 headset = ctx.socket(zmq.REQ)
 
 # Workaround VRdidge bug
-#headset.connect(answer['EndpointAddress'])
 endpoint = answer['EndpointAddress']
-headset.connect('tcp://' + server + ":" + str(endpoint.split(':')[-1]))
+headset.connect('tcp://' + options.server + ":" + str(endpoint.split(':')[-1]))
 
 # SendRadRotationAndPosition
 anglesposition = Struct(
@@ -108,9 +113,6 @@ justposition = Struct(
 	"data" / Padded(64, Array(3, Float32l)),
 )
 
-position = (0,0,0)
-ahrs = MadgwickAHRS(sampleperiod=0.005)
-
 if not options.sim:
 	# Use the first HID interface of the PSVR
 	import hidapi
@@ -119,12 +121,63 @@ if not options.sim:
 		Sensor = hidapi.Device(device_info)
 		break
 
+'''
+# -------------------------------
+# Calculate Gryo compensation (headset should be static)
+comptime = 0
+while Sensor and not options.sim:
+	data = Sensor.read(64)
+	if data == None:
+		continue
+
+	frame = sensor.parse(data[16:32])
+	time1  = frame["timestamp"]
+	if time1 < time2:
+		time2 = time2 - (1 << 24)
+	if time2:
+		delta = (time1 - time2) / 1000000
+	else:
+		# Assume 500us for first sample
+		delta = 500 / 1000000
+
+	# Sum gyro movements
+	gcomp = gcomp + np.array(frame["gyro"])
+	comptime = comptime + delta
+
+	frame = sensor.parse(data[32:48])
+	time2  = frame["timestamp"]
+	if time2 < time1:
+		time1 = time1 - (1 << 24)
+	delta = (time2 - time1) / 1000000
+
+	gcomp = gcomp + np.array(frame["gyro"])
+	comptime = comptime + delta
+
+	if comptime > 5:
+		gcomp = gcomp * GYRO_FACTOR / comptime
+		break;
+
+print("Gcomp:", gcomp)
+'''
+
+# -------------------------------
+# Initiate AHRS
+
+refq = Quaternion.from_angle_axis(np.pi/2,0,0,1)
+ahrs = MadgwickAHRS(sampleperiod=0.0005, beta=.1)
+
+# Structure of the PSVR sensor                      MPU-9250
+# Gyro 1 - yaw, +ve right hand forward              => Z
+#      2 - pitch, +ve look up                       => X
+#      3 - roll, +ve right hand down                => Y
+#
+# Acc  1 - head+, toes-                             => Z
+#      2 - right+, left-                            => X
+#      3 - front+, back-                            => Y
 while Sensor or options.sim:
 	if options.sim:
 		# use fake data for testing
-		# (pitch, _yaw_ , roll-rh-down)
-		# note: acc/gyro array manipulation (0,1,2) -> (1,0,2) added to madgwick code
-		ahrs.update_imu((1,0,0), (1,0,0))
+		ahrs.update_imu((0, 0, 0.1), (0,0,1))
 	else:
 		data = Sensor.read(64)
 		if data == None:
@@ -162,13 +215,13 @@ while Sensor or options.sim:
 
 	if options.angle:
 		# Send as euler angles
-		(p,y,r) = ahrs.quaternion.to_euler_angles()
+		(p,r,y) = ahrs.quaternion.to_euler_angles()
 		data = tuple((p,y,r)) + position
 		output = anglesposition.build(dict(data=list(data)))
 	else:
 		# Send as Quaternion (note: VRidge uses 'x,y,z,w')
 		(w,x,y,z) = tuple(ahrs.quaternion._get_q())
-		data = tuple((x,z,y,w))+ position
+		data = tuple((x,y,z,w))+ position
 		output = quaternionposition.build(dict(data=list(data)))
 
 	# Update position in VRidge
