@@ -14,12 +14,16 @@
 
     You should have received a copy of the GNU Lesser General Public License
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+    Modified for use with pyPSVR under GPL, by Simon Wood (simon@mungewell.org)
 """
 
 import warnings
 import numpy as np
 from numpy.linalg import norm
-#from quaternion import Quaternion
+
+# Requires:
+# https://github.com/KieranWynn/pyquaternion
 from pyquaternion import Quaternion
 
 
@@ -43,7 +47,7 @@ class MadgwickAHRS:
         if beta is not None:
             self.beta = beta
 
-    def update(self, gyroscope, accelerometer, magnetometer):
+    def update(self, gyroscope, accelerometer, magnetometer, samplePeriod = None):
         """
         Perform one update step with data from a AHRS sensor array
         :param gyroscope: A three-element array containing the gyroscope data in radians per second.
@@ -51,6 +55,10 @@ class MadgwickAHRS:
         :param magnetometer: A three-element array containing the magnetometer data. Can be any unit since a normalized value is used.
         :return:
         """
+
+        if samplePeriod == None:
+            samplePeriod = self.samplePeriod
+
         q = self.quaternion
 
         gyroscope = np.array(gyroscope, dtype=float).flatten()
@@ -69,17 +77,17 @@ class MadgwickAHRS:
             return
         magnetometer /= norm(magnetometer)
 
-        h = q * (Quaternion(0, magnetometer[0], magnetometer[1], magnetometer[2]) * q.conj())
+        h = q * (Quaternion(0, magnetometer[2], magnetometer[1], magnetometer[0]) * q.conj())
         b = np.array([0, norm(h[1:3]), 0, h[3]])
 
         # Gradient descent algorithm corrective step
         f = np.array([
-            2*(q[1]*q[3] - q[0]*q[2]) - accelerometer[0],
+            2*(q[1]*q[3] - q[0]*q[2]) - accelerometer[2],
             2*(q[0]*q[1] + q[2]*q[3]) - accelerometer[1],
-            2*(0.5 - q[1]**2 - q[2]**2) - accelerometer[2],
-            2*b[1]*(0.5 - q[2]**2 - q[3]**2) + 2*b[3]*(q[1]*q[3] - q[0]*q[2]) - magnetometer[0],
+            2*(0.5 - q[1]**2 - q[2]**2) - accelerometer[0],
+            2*b[1]*(0.5 - q[2]**2 - q[3]**2) + 2*b[3]*(q[1]*q[3] - q[0]*q[2]) - magnetometer[2],
             2*b[1]*(q[1]*q[2] - q[0]*q[3]) + 2*b[3]*(q[0]*q[1] + q[2]*q[3]) - magnetometer[1],
-            2*b[1]*(q[0]*q[2] + q[1]*q[3]) + 2*b[3]*(0.5 - q[1]**2 - q[2]**2) - magnetometer[2]
+            2*b[1]*(q[0]*q[2] + q[1]*q[3]) + 2*b[3]*(0.5 - q[1]**2 - q[2]**2) - magnetometer[0]
         ])
         j = np.array([
             [-2*q[2],                  2*q[3],                  -2*q[0],                  2*q[1]],
@@ -93,10 +101,10 @@ class MadgwickAHRS:
         step /= norm(step)  # normalise step magnitude
 
         # Compute rate of change of quaternion
-        qdot = (q * Quaternion(0, gyroscope[0], gyroscope[1], gyroscope[2])) * 0.5 - self.beta * step.T
+        qdot = (q * Quaternion(0, gyroscope[2], gyroscope[1], gyroscope[0])) * 0.5 - self.beta * step.T
 
         # Integrate to yield quaternion
-        q += qdot * self.samplePeriod
+        q += qdot * samplePeriod
         self.quaternion = Quaternion(q / norm(q))  # normalise quaternion
 
     def update_imu(self, gyroscope, accelerometer, samplePeriod = None):
