@@ -97,7 +97,10 @@ if platform == "win32":
 cfg = psvr.get_active_configuration() 
 
 # Interface 5 -> Endpoint 0x4
-ifnum = cfg[(5,0)].bInterfaceNumber 
+if platform == "win32":
+	ifnum = cfg[(0,0)].bInterfaceNumber 
+else:
+	ifnum = cfg[(5,0)].bInterfaceNumber 
 alternate_settting = usb.control.get_interface(psvr, ifnum) 
 intf = usb.util.find_descriptor(cfg, bInterfaceNumber = ifnum, 
 		bAlternateSetting = alternate_settting) 

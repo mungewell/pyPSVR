@@ -6,6 +6,7 @@
 # Use the to calculate the headset's rotation
 # and send to VRidge via API.
 
+from sys import exit, platform, version_info
 import argparse
 import numpy as np
 import zmq
@@ -13,6 +14,13 @@ import zmq
 from sys import version_info
 if version_info[0] < 3:
 	import six
+
+if platform == "linux" or platform == "linux2":
+	import hidapi
+else:
+	# Requires:
+	# https://github.com/trezor/cython-hidapi
+	import hid
 
 # Requires:
 # https://github.com/construct/construct
@@ -70,11 +78,17 @@ gcomp = np.array((0,0,0))
 Sensor = None
 if not options.sim:
 	# Use the first HID interface of the PSVR
-	import hidapi
-	device_list = hidapi.enumerate(0x054c, 0x09af)
-	for device_info in device_list:
-		Sensor = hidapi.Device(device_info)
-		break
+	if platform == "linux" or platform == "linux2":
+		device_list = hidapi.enumerate(0x054c, 0x09af)
+		for device_info in device_list:
+			Sensor = hidapi.Device(device_info)
+			break
+	else:
+		Sensor = hid.device()
+		Sensor.open(0x054c, 0x09af)
+
+		# enable non-blocking mode
+		Sensor.set_nonblocking(1)
 
 # -------------------------------
 # Make a connection to VRidge-API server
@@ -135,8 +149,8 @@ comptime = 0
 if options.comp:
 	print("Calibrating sensor - keep PSVR stationary 5s")
 while Sensor and options.comp:
-	data = Sensor.read(64)
-	if data == None:
+	data = bytes(Sensor.read(64))
+	if data == None or len(data) == 0:
 		continue
 
 	frame = sensor.parse(data[16:32])
@@ -185,8 +199,8 @@ while Sensor or options.sim:
 		#ahrs.update_imu((0, 0, 1), (1, 0, 0)) # looking front, yawing to right
 		ahrs.update_imu((0, 1, 0), (0, 1, 0)) # looking right, pitching up
 	else:
-		data = Sensor.read(64)
-		if data == None:
+		data = bytes(Sensor.read(64))
+		if data == None or len(data) == 0:
 			continue
 
 		frame = sensor.parse(data[16:32])
