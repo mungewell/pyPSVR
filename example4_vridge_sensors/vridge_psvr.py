@@ -7,20 +7,24 @@
 # and send to VRidge via API.
 
 import argparse
+import numpy as np
+import zmq
+
 from sys import version_info
 if version_info[0] < 3:
 	import six
 
+# Requires:
+# https://github.com/construct/construct
 from construct import *
-import numpy as np
-import zmq
 
-# https://github.com/morgil/madgwick_py
-# Reused under GPLv3
-#from quaternion import Quaternion
-from madgwickahrs import MadgwickAHRS
-
+# Requires:
+# https://github.com/KieranWynn/pyquaternion
 from pyquaternion import Quaternion
+
+# Locally cloned and modified (Reused under GPLv3)
+# https://github.com/morgil/madgwick_py
+from madgwickahrs import MadgwickAHRS
 
 
 # Commandline options
@@ -31,7 +35,7 @@ parser.add_argument("-A", "--angle", action="store_true", dest="angle",
 parser.add_argument("-S", "--sim", action="store_true", dest="sim",
 	help="Simuluate the PSVR" )
 parser.add_argument("-D", "--debug", action="store_true", dest="debug",
-	help="Output extra Debug" )
+	help="Output extra debug messages" )
 
 parser.add_argument("-s", "--server", dest="server", default="localhost",
 	help="Use particular server (instead of localhost)" )
@@ -40,15 +44,16 @@ parser.add_argument("-c", "--comp", action="store_true", dest="comp",
 
 options = parser.parse_args()
 
-
-# Structure of the PSVR sensor                      MPU-9250
-# Gyro 1 - yaw, +ve right hand forward              => Z
-#      2 - pitch, +ve look up                       => X
-#      3 - roll, +ve right hand down                => Y
+# -------------------------------
+# Structure of the PSVR sensor
+# Gyro 0 - yaw, +ve right hand forward
+#      1 - pitch, +ve look up
+#      2 - roll, +ve right hand down
 #
-# Acc  1 - head+, toes-                             => Z
-#      2 - right+, left-                            => X
-#      3 - front+, back-                            => Y
+# Acc  0 - head+, toes-
+#      1 - right+, left-
+#      2 - front+, back-
+
 sensor = Struct(
    "timestamp" / Int32ul,      # only 24bits used, then rolls, usec
    "gyro" / Array(3, Int16sl), # +/-250 degree/second allegdely
@@ -58,13 +63,23 @@ sensor = Struct(
 ACC_FACTOR = np.array((1, 1, -1))
 GYRO_FACTOR = np.array((1, 1, -1)) * ((1998.0/(1<<15)) * (np.pi/180.0))
 
-Sensor = None
+time2 = 0
 position = (0,0,0)
 gcomp = np.array((0,0,0))
-time2 = 0
+
+Sensor = None
+if not options.sim:
+	# Use the first HID interface of the PSVR
+	import hidapi
+	device_list = hidapi.enumerate(0x054c, 0x09af)
+	for device_info in device_list:
+		Sensor = hidapi.Device(device_info)
+		break
 
 # -------------------------------
 # Make a connection to VRidge-API server
+# may need Windows firewall rules to allow
+
 addr = 'tcp://' + options.server + ':38219'
 print ("Connecting to", addr)
 
@@ -86,10 +101,9 @@ if options.debug:
 	print(answer)
 
 # -------------------------------
-# Connect to headset
+# Connect to headset control port
 headset = ctx.socket(zmq.REQ)
 
-# Workaround VRdidge bug
 endpoint = answer['EndpointAddress']
 headset.connect('tcp://' + options.server + ":" + str(endpoint.split(':')[-1]))
 
@@ -115,17 +129,11 @@ justposition = Struct(
 	"data" / Padded(64, Array(3, Float32l)),
 )
 
-if not options.sim:
-	# Use the first HID interface of the PSVR
-	import hidapi
-	device_list = hidapi.enumerate(0x054c, 0x09af)
-	for device_info in device_list:
-		Sensor = hidapi.Device(device_info)
-		break
-
 # -------------------------------
 # Calculate Gryo compensation (headset should be static)
 comptime = 0
+if options.comp:
+	print("Calibrating sensor - keep PSVR stationary 5s")
 while Sensor and options.comp:
 	data = Sensor.read(64)
 	if data == None:
@@ -164,33 +172,15 @@ while Sensor and options.comp:
 # Initiate AHRS
 
 refq = Quaternion(1,0,0,0) # look front
-'''
-refq = Quaternion.from_angle_axis(np.pi/2,0,0,1) # look front, sideways
-refq = Quaternion.from_angle_axis(np.pi/2,1,0,0) # look up
-refq = Quaternion.from_angle_axis(np.pi/2,0,1,0) # look right
-'''
 #refq = Quaternion(axis=[0,0,1],angle=np.pi/2) # look right
 #refq = Quaternion(axis=[1,0,0],angle=np.pi/2) # look front, roll 90' left-down
 #refq = Quaternion(axis=[0,1,0],angle=np.pi/2) # look up
-ahrs = MadgwickAHRS(sampleperiod=0.0005, beta=0.1 , quaternion=refq)
 
-# Structure of the PSVR sensor                      MPU-9250
-# Gyro 1 - yaw, +ve right hand forward              => Z
-#      2 - pitch, +ve look up                       => X
-#      3 - roll, +ve right hand down                => Y
-#
-# Acc  1 - head+, toes-                             => Z
-#      2 - right+, left-                            => X
-#      3 - front+, back-                            => Y
+ahrs = MadgwickAHRS(sampleperiod=0.0005, beta=0.1, quaternion=refq)
+
 while Sensor or options.sim:
 	if options.sim:
 		# use fake data for testing
-		# (yaw, pitch, roll) (up, side, side)
-		a=1
-		#ahrs.update_imu((1, 0, 0), (0, 0, 1)) # sideways, pitching
-		#ahrs.update_imu((0, 0, 1), (1, 0, 0)) # looking front, rolling right up
-		#ahrs.update_imu((0, 1, 0), (0, 1, 0)) # looking right, pitching up
-
 		#ahrs.update_imu((1, 0, 0), (0, 0, 1)) # sideways, pitching
 		#ahrs.update_imu((0, 0, 1), (1, 0, 0)) # looking front, yawing to right
 		ahrs.update_imu((0, 1, 0), (0, 1, 0)) # looking right, pitching up
@@ -209,8 +199,8 @@ while Sensor or options.sim:
 			# Assume 500us for first sample
 			delta = 500 / 1000000
 
-		# Compute headset rotation - first data
-		ahrs.update_imu(np.array(frame["gyro"]-gcomp)*GYRO_FACTOR, \
+		# Compute headset rotation - first data block
+		ahrs.update_imu((np.array(frame["gyro"])-gcomp)*GYRO_FACTOR, \
 				(np.array(frame["acc"])>>4)*ACC_FACTOR , delta)
 
 		frame = sensor.parse(data[32:48])
@@ -219,37 +209,21 @@ while Sensor or options.sim:
 			time1 = time1 - (1 << 24)
 		delta = (time2 - time1) / 1000000
 
-		# Compute headset rotation - second data
-		ahrs.update_imu(np.array(frame["gyro"]-gcomp)*GYRO_FACTOR, \
+		# Compute headset rotation - second data block
+		ahrs.update_imu((np.array(frame["gyro"])-gcomp)*GYRO_FACTOR, \
 				(np.array(frame["acc"])>>4)*ACC_FACTOR , delta)
 
 	if options.debug:
-		'''
-		print("Euler: ", ahrs.quaternion.to_euler_angles())
-		print("Eu123: ", ahrs.quaternion.to_euler123())
-		print("Quat:  ", ahrs.quaternion._get_q())
-		'''
 		print("Euler: ", ahrs.quaternion.yaw_pitch_roll)
 		print("Quat:  ", ahrs.quaternion.elements)
 		print()
 
 	if options.angle:
-		'''
-		# Send as euler angles
-		(p,r,y) = ahrs.quaternion.to_euler_angles()
-		# Send as euler123 angles
-		(r,p,y) = ahrs.quaternion.to_euler123()
-		(r,y,p) = ahrs.quaternion.yaw_pitch_roll
-		'''
 		(y,p,r) = ahrs.quaternion.yaw_pitch_roll
 		data = tuple((p,y,r)) + position
 		output = anglesposition.build(dict(data=list(data)))
 	else:
-		# Send as Quaternion (note: VRidge uses 'x,y,z,w')
-		'''
-		(w,x,y,z) = tuple(ahrs.quaternion._get_q())
-		data = tuple((x,y,z,w))+ position
-		'''
+		# Send as Quaternion (note: VRidge params switched)
 		(w,x,y,z) = ahrs.quaternion.elements
 		data = tuple((y,z,x,w))+ position
 		output = quaternionposition.build(dict(data=list(data)))
