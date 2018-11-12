@@ -17,8 +17,10 @@ import zmq
 
 # https://github.com/morgil/madgwick_py
 # Reused under GPLv3
-from quaternion import Quaternion
+#from quaternion import Quaternion
 from madgwickahrs import MadgwickAHRS
+
+from pyquaternion import Quaternion
 
 
 # Commandline options
@@ -33,6 +35,8 @@ parser.add_argument("-D", "--debug", action="store_true", dest="debug",
 
 parser.add_argument("-s", "--server", dest="server", default="localhost",
 	help="Use particular server (instead of localhost)" )
+parser.add_argument("-c", "--comp", action="store_true", dest="comp",
+	help="Enable Gryo Compensation" )
 
 options = parser.parse_args()
 
@@ -51,7 +55,7 @@ sensor = Struct(
    "acc" / Array(3, Int16sl),  # only 12bits used, >> 4
 )
 
-ACC_FACTOR = np.array((1, -1, 1))
+ACC_FACTOR = np.array((1, 1, -1))
 GYRO_FACTOR = np.array((1, 1, -1)) * ((1998.0/(1<<15)) * (np.pi/180.0))
 
 Sensor = None
@@ -61,9 +65,7 @@ time2 = 0
 
 # -------------------------------
 # Make a connection to VRidge-API server
-#server = 'localhost'
-server = '192.168.0.116'
-addr = 'tcp://' + server + ':38219'
+addr = 'tcp://' + options.server + ':38219'
 print ("Connecting to", addr)
 
 ctx = zmq.Context()
@@ -121,11 +123,10 @@ if not options.sim:
 		Sensor = hidapi.Device(device_info)
 		break
 
-'''
 # -------------------------------
 # Calculate Gryo compensation (headset should be static)
 comptime = 0
-while Sensor and not options.sim:
+while Sensor and options.comp:
 	data = Sensor.read(64)
 	if data == None:
 		continue
@@ -155,16 +156,23 @@ while Sensor and not options.sim:
 
 	if comptime > 5:
 		gcomp = gcomp * GYRO_FACTOR / comptime
+		print("Gcomp:", gcomp)
 		break;
 
-print("Gcomp:", gcomp)
-'''
 
 # -------------------------------
 # Initiate AHRS
 
-refq = Quaternion.from_angle_axis(np.pi/2,0,0,1)
-ahrs = MadgwickAHRS(sampleperiod=0.0005, beta=.1)
+refq = Quaternion(1,0,0,0) # look front
+'''
+refq = Quaternion.from_angle_axis(np.pi/2,0,0,1) # look front, sideways
+refq = Quaternion.from_angle_axis(np.pi/2,1,0,0) # look up
+refq = Quaternion.from_angle_axis(np.pi/2,0,1,0) # look right
+'''
+#refq = Quaternion(axis=[0,0,1],angle=np.pi/2) # look right
+#refq = Quaternion(axis=[1,0,0],angle=np.pi/2) # look front, roll 90' left-down
+#refq = Quaternion(axis=[0,1,0],angle=np.pi/2) # look up
+ahrs = MadgwickAHRS(sampleperiod=0.0005, beta=0.1 , quaternion=refq)
 
 # Structure of the PSVR sensor                      MPU-9250
 # Gyro 1 - yaw, +ve right hand forward              => Z
@@ -177,7 +185,15 @@ ahrs = MadgwickAHRS(sampleperiod=0.0005, beta=.1)
 while Sensor or options.sim:
 	if options.sim:
 		# use fake data for testing
-		ahrs.update_imu((0, 0, 0.1), (0,0,1))
+		# (yaw, pitch, roll) (up, side, side)
+		a=1
+		#ahrs.update_imu((1, 0, 0), (0, 0, 1)) # sideways, pitching
+		#ahrs.update_imu((0, 0, 1), (1, 0, 0)) # looking front, rolling right up
+		#ahrs.update_imu((0, 1, 0), (0, 1, 0)) # looking right, pitching up
+
+		#ahrs.update_imu((1, 0, 0), (0, 0, 1)) # sideways, pitching
+		#ahrs.update_imu((0, 0, 1), (1, 0, 0)) # looking front, yawing to right
+		ahrs.update_imu((0, 1, 0), (0, 1, 0)) # looking right, pitching up
 	else:
 		data = Sensor.read(64)
 		if data == None:
@@ -194,7 +210,7 @@ while Sensor or options.sim:
 			delta = 500 / 1000000
 
 		# Compute headset rotation - first data
-		ahrs.update_imu(np.array(frame["gyro"])*GYRO_FACTOR, \
+		ahrs.update_imu(np.array(frame["gyro"]-gcomp)*GYRO_FACTOR, \
 				(np.array(frame["acc"])>>4)*ACC_FACTOR , delta)
 
 		frame = sensor.parse(data[32:48])
@@ -204,24 +220,38 @@ while Sensor or options.sim:
 		delta = (time2 - time1) / 1000000
 
 		# Compute headset rotation - second data
-		ahrs.update_imu(np.array(frame["gyro"])*GYRO_FACTOR, \
+		ahrs.update_imu(np.array(frame["gyro"]-gcomp)*GYRO_FACTOR, \
 				(np.array(frame["acc"])>>4)*ACC_FACTOR , delta)
 
 	if options.debug:
-		print(ahrs.quaternion.to_euler_angles())
-		print(ahrs.quaternion.to_euler123())
-		print(ahrs.quaternion._get_q())
+		'''
+		print("Euler: ", ahrs.quaternion.to_euler_angles())
+		print("Eu123: ", ahrs.quaternion.to_euler123())
+		print("Quat:  ", ahrs.quaternion._get_q())
+		'''
+		print("Euler: ", ahrs.quaternion.yaw_pitch_roll)
+		print("Quat:  ", ahrs.quaternion.elements)
 		print()
 
 	if options.angle:
+		'''
 		# Send as euler angles
 		(p,r,y) = ahrs.quaternion.to_euler_angles()
+		# Send as euler123 angles
+		(r,p,y) = ahrs.quaternion.to_euler123()
+		(r,y,p) = ahrs.quaternion.yaw_pitch_roll
+		'''
+		(y,p,r) = ahrs.quaternion.yaw_pitch_roll
 		data = tuple((p,y,r)) + position
 		output = anglesposition.build(dict(data=list(data)))
 	else:
 		# Send as Quaternion (note: VRidge uses 'x,y,z,w')
+		'''
 		(w,x,y,z) = tuple(ahrs.quaternion._get_q())
 		data = tuple((x,y,z,w))+ position
+		'''
+		(w,x,y,z) = ahrs.quaternion.elements
+		data = tuple((y,z,x,w))+ position
 		output = quaternionposition.build(dict(data=list(data)))
 
 	# Update position in VRidge
