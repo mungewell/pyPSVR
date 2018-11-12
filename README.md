@@ -3,10 +3,12 @@ Python scripts for control and interaction with the Playstation PSVR
 
 Supports both Linux and Windows, with Python 3 or 2 (using 'six' module).
 
-Windows requires 'libusb' to be installed and the driver applied to the whole composite device.
+Windows requires 'libusb' to be installed. In order for the sensors to also
+be readably the libusb driver should be applied to the 'Endpoint 5' (NOT 
+the 'Composite Device', as instructed previously).
 
 Example usage:
---
+```
 D:\>python pyPSVR.py --help
 usage: pyPSVR.py [-h] [-S] [-o] [-O] [-v] [-c] [-l] [-L LEDVAL] [-N LEDNUM]
                  [-s SIZE] [-d DIST] [-m MIST] [-b BRIGHT] [-H HDMI] [-k] [-r]
@@ -36,9 +38,11 @@ optional arguments:
   -C, --cal             Request calibration data
   -G REG, --reg REG     Request register data
   -R, --read            After writing command, listen for responses
+```
 
 Switching to VR mode with the LEDs enabled (on Linux):
---
+```
 $ sudo python pyPSVR.py -v -l
 Detaching: 5
 Re-attaching: 5
+```
