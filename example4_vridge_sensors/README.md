@@ -1,0 +1,16 @@
+
+To use these scripts under Linux you will need the following packages
+```
+$ sudo apt-get install python3-setuptools python3-usb python3-zmq python3-numpy python3-hidapi
+```
+
+You will also need to clone (download) the following projects and install them:
+https://github.com/construct/construct
+https://github.com/KieranWynn/pyquaternion
+
+Control of the pyPSVR (for setting VR mode/etc) functions under Windows, however the HID code for reading the sensors does not.
+
+The script can be runnig on seperate (Linux PC) which might be laggy, or in a virtual machine.
+
+It is hoped to implement Windows HID code soon.
+
