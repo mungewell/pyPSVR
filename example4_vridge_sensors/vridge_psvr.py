@@ -10,6 +10,8 @@ from sys import exit, platform, version_info
 import argparse
 import numpy as np
 import zmq
+import time
+import hexdump
 
 from sys import version_info
 if version_info[0] < 3:
@@ -38,6 +40,15 @@ from madgwickahrs import MadgwickAHRS
 # Commandline options
 parser = argparse.ArgumentParser(prog='vridge_psvr.py')
 
+# specific an initial position
+
+parser.add_argument("-X", "--xpos", dest="X", type=float, default="0.0",
+	help="Specify an initial X position (float in Meters)")
+parser.add_argument("-Y", "--ypos", dest="Y", type=float, default="1.6",
+	help="Specify an initial Y position (float in Meters)")
+parser.add_argument("-Z", "--zpos", dest="Z", type=float, default="0.0",
+	help="Specify an initial Z position (float in Meters)")
+
 parser.add_argument("-A", "--angle", action="store_true", dest="angle",
 	help="Send data to VRidge as angles (rather than Quaternions" )
 parser.add_argument("-S", "--sim", action="store_true", dest="sim",
@@ -47,6 +58,8 @@ parser.add_argument("-D", "--debug", action="store_true", dest="debug",
 
 parser.add_argument("-s", "--server", dest="server", default="localhost",
 	help="Use particular server (instead of localhost)" )
+parser.add_argument("-f", "--fps", dest="fps", type=float, default="60.0",
+	help="Specify an approximate fps, ie. set frequency that reports are sent")
 parser.add_argument("-c", "--comp", action="store_true", dest="comp",
 	help="Enable Gryo Compensation" )
 
@@ -72,7 +85,8 @@ ACC_FACTOR = np.array((1, 1, -1))
 GYRO_FACTOR = np.array((1, 1, -1)) * ((1998.0/(1<<15)) * (np.pi/180.0))
 
 time2 = 0
-position = (0,0,0)
+#position = (0,-0.4,0)
+position = (options.X, options.Y, options.Z)
 gcomp = np.array((0,0,0))
 
 Sensor = None
@@ -132,14 +146,14 @@ anglesposition = Struct(
 quaternionposition = Struct(
 	Const(2, Int32ul),  # Version
 	Const(4, Int32ul),  # SendQuaternionRotationAndPosition
-	Const(24, Int32ul), # DataLength
+	Const(28, Int32ul), # DataLength
 	"data" / Padded(64, Array(7, Float32l)),
 )
 # SendPosition
 justposition = Struct(
 	Const(2, Int32ul),  # Version
 	Const(5, Int32ul),  # SendPosition
-	Const(24, Int32ul), # DataLength
+	Const(12, Int32ul), # DataLength
 	"data" / Padded(64, Array(3, Float32l)),
 )
 
@@ -192,12 +206,13 @@ refq = Quaternion(1,0,0,0) # look front
 
 ahrs = MadgwickAHRS(sampleperiod=0.0005, beta=0.1, quaternion=refq)
 
+output_time = time.time() + (1.0/options.fps)
 while Sensor or options.sim:
 	if options.sim:
 		# use fake data for testing
-		#ahrs.update_imu((1, 0, 0), (0, 0, 1)) # sideways, pitching
+		ahrs.update_imu((1, 0, 0), (0, 0, 1)) # sideways, pitching
 		#ahrs.update_imu((0, 0, 1), (1, 0, 0)) # looking front, yawing to right
-		ahrs.update_imu((0, 1, 0), (0, 1, 0)) # looking right, pitching up
+		#ahrs.update_imu((0, 1, 0), (0, 1, 0)) # looking right, pitching up
 	else:
 		data = bytes(Sensor.read(64))
 		if data == None or len(data) == 0:
@@ -228,23 +243,31 @@ while Sensor or options.sim:
 				(np.array(frame["acc"])>>4)*ACC_FACTOR , delta)
 
 	if options.debug:
+		print("Position: ", position)
 		print("Euler: ", ahrs.quaternion.yaw_pitch_roll)
 		print("Quat:  ", ahrs.quaternion.elements)
 		print()
 
-	if options.angle:
-		(y,p,r) = ahrs.quaternion.yaw_pitch_roll
-		data = tuple((p,y,r)) + position
-		output = anglesposition.build(dict(data=list(data)))
-	else:
-		# Send as Quaternion (note: VRidge params switched)
-		(w,x,y,z) = ahrs.quaternion.elements
-		data = tuple((y,z,x,w))+ position
-		output = quaternionposition.build(dict(data=list(data)))
+	# limit the rate that position is written to VRidgeAPI
+	if time.time() > output_time:
+		output_time += (1.0/options.fps)
 
-	# Update position in VRidge
-	headset.send(output)
-	answer = headset.recv()
+		if options.angle:
+			(y,p,r) = ahrs.quaternion.yaw_pitch_roll
+			data = tuple((p,y,r)) + position
+			output = anglesposition.build(dict(data=list(data)))
+		else:
+			# Send as Quaternion (note: VRidge params switched)
+			(w,x,y,z) = ahrs.quaternion.elements
+			data = tuple((y,z,x,w)) + position
+
+			output = quaternionposition.build(dict(data=list(data)))
+			if options.debug:
+				print(hexdump.hexdump(output))
+
+		# Update position in VRidge
+		headset.send(output)
+		answer = headset.recv()
 
 # clean up connections
 headset.close()
