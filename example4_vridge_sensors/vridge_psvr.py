@@ -11,7 +11,6 @@ import argparse
 import numpy as np
 import zmq
 import time
-import hexdump
 
 from sys import version_info
 if version_info[0] < 3:
@@ -262,8 +261,6 @@ while Sensor or options.sim:
 			data = tuple((y,z,x,w)) + position
 
 			output = quaternionposition.build(dict(data=list(data)))
-			if options.debug:
-				print(hexdump.hexdump(output))
 
 		# Update position in VRidge
 		headset.send(output)
