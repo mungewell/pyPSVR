@@ -14,6 +14,16 @@ import zmq
 import time
 import math
 
+# we will use OpenVR to sense HMD VSync timing
+try:
+	import openvr
+	_hasOpenVR = True
+except ImportError:
+	_hasOpenVR = False
+'''
+_hasOpenVR = False
+'''
+
 # Commandline options
 parser = argparse.ArgumentParser(prog='reposition.py')
 
@@ -110,15 +120,28 @@ def float_range(start, stop, step):
 		yield float(start)
 		start += step
 
+if _hasOpenVR:
+	openvr.init(openvr.VRApplication_Scene)
+
 if options.spin:
+	# Spin 360 degrees, takes 10s, step size is calculated for FPS
 	for swivel in float_range(0.0, 10.0, 1.0/options.fps):
 		output = anglesposition.build(dict(data=[ \
-                        math.radians(0),math.radians(36 * swivel),math.radians(0) \
-                        ,0,0,0]))
+                        math.radians(options.pitch),math.radians(36 * swivel), \
+			math.radians(options.roll), \
+			options.X, options.Y, options.Z ]))
 		headset.send(output)
 		answer = headset.recv()
 
-		time.sleep(1.0/options.fps)
+		if _hasOpenVR:
+			time_since = openvr.VRSystem().getTimeSinceLastVsync()
+			to_sleep = (1.0/options.fps) - time_since[1]
+			#print("to_sleep", to_sleep, "frame", time_since[2])
+
+			if to_sleep > 0.0:
+				time.sleep(to_sleep)
+		else:
+			time.sleep(1.0/options.fps)
 
 headset.close()
 control.close()
