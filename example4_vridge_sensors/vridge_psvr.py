@@ -12,6 +12,16 @@ import numpy as np
 import zmq
 import time
 
+# we will use OpenVR to sense HMD VSync timing
+try:
+	import openvr
+	_hasOpenVR = True
+except ImportError:
+	_hasOpenVR = False
+'''
+_hasOpenVR = False
+'''
+
 from sys import version_info
 if version_info[0] < 3:
 	import six
@@ -84,7 +94,8 @@ ACC_FACTOR = np.array((1, 1, -1))
 GYRO_FACTOR = np.array((1, 1, -1)) * ((1998.0/(1<<15)) * (np.pi/180.0))
 
 time2 = 0
-#position = (0,-0.4,0)
+data_timestamp = 0
+next_output_time = 0
 position = (options.X, options.Y, options.Z)
 gcomp = np.array((0,0,0))
 
@@ -205,7 +216,9 @@ refq = Quaternion(1,0,0,0) # look front
 
 ahrs = MadgwickAHRS(sampleperiod=0.0005, beta=0.1, quaternion=refq)
 
-output_time = time.time() + (1.0/options.fps)
+if _hasOpenVR:
+	openvr.init(openvr.VRApplication_Overlay)
+
 while Sensor or options.sim:
 	if options.sim:
 		# use fake data for testing
@@ -216,6 +229,8 @@ while Sensor or options.sim:
 		data = bytes(Sensor.read(64))
 		if data == None or len(data) == 0:
 			continue
+
+		data_timestamp = time.time()
 
 		frame = sensor.parse(data[16:32])
 		time1  = frame["timestamp"]
@@ -248,23 +263,30 @@ while Sensor or options.sim:
 		print()
 
 	# limit the rate that position is written to VRidgeAPI
-	if time.time() > output_time:
-		output_time += (1.0/options.fps)
+	time_now = time.time()
+	if time_now < next_output_time:
+		continue
 
-		if options.angle:
-			(y,p,r) = ahrs.quaternion.yaw_pitch_roll
-			data = tuple((p,y,r)) + position
-			output = anglesposition.build(dict(data=list(data)))
-		else:
-			# Send as Quaternion (note: VRidge params switched)
-			(w,x,y,z) = ahrs.quaternion.elements
-			data = tuple((y,z,x,w)) + position
+	if _hasOpenVR:
+		time_since = openvr.VRSystem().getTimeSinceLastVsync()
+		next_output_time = time_now + (1.0/options.fps) - time_since[1]
+	else:
+		next_output_time = time_now + (1.0/options.fps)
 
-			output = quaternionposition.build(dict(data=list(data)))
+	if options.angle:
+		(y,p,r) = ahrs.quaternion.yaw_pitch_roll
+		data = tuple((p,y,r)) + position
+		output = anglesposition.build(dict(data=list(data)))
+	else:
+		# Send as Quaternion (note: VRidge params switched)
+		(w,x,y,z) = ahrs.quaternion.elements
+		data = tuple((y,z,x,w)) + position
 
-		# Update position in VRidge
-		headset.send(output)
-		answer = headset.recv()
+		output = quaternionposition.build(dict(data=list(data)))
+
+	# Update position in VRidge
+	headset.send(output)
+	answer = headset.recv()
 
 # clean up connections
 headset.close()

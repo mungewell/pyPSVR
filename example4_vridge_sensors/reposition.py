@@ -46,6 +46,8 @@ parser.add_argument("-s", "--server", dest="server", default="localhost",
 	help="Use particular server (instead of localhost)" )
 parser.add_argument("-f", "--fps", dest="fps", type=float, default="60.0",
 	help="Specify an approximate fps, ie. set frequency that reports are sent")
+parser.add_argument("-t", "--offset", dest="offset", type=float, default="0.0",
+	help="Specify an time offset for the timing of HMD VSync" )
 parser.add_argument("-S", "--spin", action="store_true", dest="spin",
 	help="Do a spin test, turn around for 10s before exiting" )
 
@@ -120,10 +122,10 @@ def float_range(start, stop, step):
 		yield float(start)
 		start += step
 
-if _hasOpenVR:
-	openvr.init(openvr.VRApplication_Scene)
-
 if options.spin:
+	if _hasOpenVR:
+		openvr.init(openvr.VRApplication_Overlay)
+
 	# Spin 360 degrees, takes 10s, step size is calculated for FPS
 	for swivel in float_range(0.0, 10.0, 1.0/options.fps):
 		output = anglesposition.build(dict(data=[ \
@@ -135,7 +137,7 @@ if options.spin:
 
 		if _hasOpenVR:
 			time_since = openvr.VRSystem().getTimeSinceLastVsync()
-			to_sleep = (1.0/options.fps) - time_since[1]
+			to_sleep = (1.0/options.fps) - time_since[1] + options.offset
 			#print("to_sleep", to_sleep, "frame", time_since[2])
 
 			if to_sleep > 0.0:
