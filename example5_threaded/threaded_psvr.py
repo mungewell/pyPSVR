@@ -185,10 +185,90 @@ class psvr_sensor(threading.Thread):
         return self.event_terminated.isSet()
 
 # =====================================================================
+# Make a connection to VRidge-API server
+# may need Windows firewall rules to allow
+
+import zmq
+
+# SendRadRotationAndPosition
+yaw_pitch_roll_pos = Struct(
+    Const(2, Int32ul),  # Version
+    Const(3, Int32ul),  # SendRadRotationAndPosition
+    Const(24, Int32ul),  # DataLength
+    "data" / Padded(64, Array(6, Float32l)),
+)
+# SendQuaternionRotationAndPosition
+quaternion_pos = Struct(
+    Const(2, Int32ul),  # Version
+    Const(4, Int32ul),  # SendQuaternionRotationAndPosition
+    Const(28, Int32ul),  # DataLength
+    "data" / Padded(64, Array(7, Float32l)),
+)
+# SendPosition
+position = Struct(
+    Const(2, Int32ul),  # Version
+    Const(5, Int32ul),  # SendPosition
+    Const(12, Int32ul),  # DataLength
+    "data" / Padded(64, Array(3, Float32l)),
+)
+
+class vridge_headset(object):
+    connected = False
+
+    def connect(self, server):
+        global options
+
+        if self.connected:
+            return True
+
+        addr = 'tcp://' + server + ':38219'
+        if options.debug:
+            print("Connecting to", addr)
+
+        self.ctx = zmq.Context()
+
+        # connect to the control channel
+        self.control = self.ctx.socket(zmq.REQ)
+        self.control.connect(addr)
+
+        self.control.send_json({"ProtocolVersion": 1, "Code": 2})
+        answer = self.control.recv_json()
+
+        self.control.send_json({
+            "RequestedEndpointName": "HeadTracking",
+            "ProtocolVersion": 1,
+            "Code": 1
+            })
+        answer = self.control.recv_json()
+
+        # Connect to headset control port
+        self.headset = self.ctx.socket(zmq.REQ)
+
+        endpoint = answer['EndpointAddress']
+        self.headset.connect('tcp://' + server + ":" + str(endpoint.split(':')[-1]))
+
+        connected = True
+        return connected
+
+    def yaw_pitch_roll_pos(self, data):
+        self.headset.send(yaw_pitch_roll_pos.build(dict(data=list(data))))
+        answer = self.headset.recv()
+
+    def quaternion_pos(self, data):
+        self.headset.send(quaternion_pos.build(dict(data=list(data))))
+        answer = self.headset.recv()
+
+    def disconnect(self):
+        self.connected = False
+
+        self.headset.close()
+        self.control.close()
+        self.ctx.destroy()
+
+# =====================================================================
 def Run():
     import argparse
 
-    '''
     # we will use OpenVR to sense HMD VSync timing
     try:
         import openvr
@@ -197,6 +277,7 @@ def Run():
         _hasOpenVR = False
     '''
     _hasOpenVR = False
+    '''
 
     global options, display
 
@@ -210,28 +291,55 @@ def Run():
     parser.add_argument("-f", "--fps", dest="fps", type=float, default="60.0",
         help="Specify an approximate fps, ie. set frequency that reports are sent")
 
+    parser.add_argument("-X", "--xpos", dest="X", type=float, default="0.0",
+        help="Specify an initial X position (float in Meters)")
+    parser.add_argument("-Y", "--ypos", dest="Y", type=float, default="1.6",
+        help="Specify an initial Y position (float in Meters)")
+    parser.add_argument("-Z", "--zpos", dest="Z", type=float, default="0.0",
+        help="Specify an initial Z position (float in Meters)")
+
+    parser.add_argument( "-s", "--server", dest="server", default="localhost",
+        help="Use particular server (instead of localhost)")
+    parser.add_argument( "-A", "--angle", action="store_true", dest="angle",
+        help="Send data to VRidge as angles (rather than Quaternions")
+
     options = parser.parse_args()
 
     if options.fps < 1.0:
         options.fps = 1.0
 
-    headset = psvr_sensor()
-    headset.start()
+    position = (options.X, options.Y, options.Z)
+
+    sensor = psvr_sensor()
+    sensor.start()
+
+    headset = vridge_headset()
+    headset.connect(options.server)
 
     # capture Control-C to close application
-    signal.signal(signal.SIGINT, headset.terminate)
+    signal.signal(signal.SIGINT, sensor.terminate)
 
     if _hasOpenVR:
         openvr.init(openvr.VRApplication_Overlay)
 
     if options.calibrate:
-        headset.calibrate()
+        sensor.calibrate()
 
-    while not headset.terminated():
-        (y,p,r) = headset.yaw_pitch_roll()
+    while not sensor.terminated():
+        if options.angle:
+            (y,p,r) = sensor.yaw_pitch_roll()
+            data = tuple((p, y, r)) + position
+            headset.yaw_pitch_roll_pos(data)
 
-        if options.debug:
-            print("Angles: ", y, p, r)
+            if options.debug:
+                print("Angles: ", y, p, r)
+        else:
+            (w, x, y, z) = sensor.elements()
+            data = tuple((y, z, x, w)) + position
+            headset.quaternion_pos(data)
+
+            if options.debug:
+                print("Elements: ", w, x, y, z)
 
         if _hasOpenVR:
             time_since = openvr.VRSystem().getTimeSinceLastVsync()
@@ -241,6 +349,9 @@ def Run():
                 time.sleep(to_sleep)
         else:
                 time.sleep(1.0/options.fps)
+
+    # clean up
+    headset.disconnect()
 
 if __name__ == '__main__':
     Run()
