@@ -303,6 +303,9 @@ def Run():
     parser.add_argument( "-A", "--angle", action="store_true", dest="angle",
         help="Send data to VRidge as angles (rather than Quaternions")
 
+    parser.add_argument( "-K", "--kinect", action="store_true", dest="kinect",
+        help="Read position(s) from Kinect_v1 and send to vridge")
+
     options = parser.parse_args()
 
     if options.fps < 1.0:
@@ -310,22 +313,53 @@ def Run():
 
     position = (options.X, options.Y, options.Z)
 
-    sensor = psvr_sensor()
-    sensor.start()
-
     headset = vridge_headset()
     headset.connect(options.server)
+
+    sensor = psvr_sensor()
+    sensor.start()
 
     # capture Control-C to close application
     signal.signal(signal.SIGINT, sensor.terminate)
 
-    if _hasOpenVR:
-        openvr.init(openvr.VRApplication_Overlay)
-
     if options.calibrate:
         sensor.calibrate()
 
+    if _hasOpenVR:
+        poses = []
+        #openvr.init(openvr.VRApplication_Scene)
+        openvr.init(openvr.VRApplication_Overlay)
+
+        if options.kinect:
+            for x in range(30):
+                if openvr.VRSystem().isTrackedDeviceConnected(x) :
+                    print("Tracked Device:", x, "name:", \
+                        openvr.VRSystem().getStringTrackedDeviceProperty(x, openvr.Prop_ModelNumber_String), ",",\
+                        openvr.VRSystem().getStringTrackedDeviceProperty(x, openvr.Prop_SerialNumber_String))
+
     while not sensor.terminated():
+        if _hasOpenVR:
+            if options.kinect:
+                '''
+                poses, game_poses = openvr.VRCompositor().waitGetPoses(poses, None)
+                kinect = poses[1]
+                '''
+                res, state, kinect = openvr.VRSystem().getControllerStateWithPose(0,2)
+
+                mat = kinect.mDeviceToAbsoluteTracking
+                A = np.matrix(
+                    ((mat.m[0][0], mat.m[0][1], mat.m[0][2], mat.m[0][3]),
+                    (mat.m[1][0], mat.m[1][1], mat.m[1][2], mat.m[1][3]),
+                    (mat.m[2][0], mat.m[2][1], mat.m[2][2], mat.m[2][3]),)
+                    , np.float32)
+
+                '''
+                P = A.dot(np.matrix('0; 0; 0; 1')) + np.array( \
+                    [[options.Y], [options.X], [options.Z]])
+
+                position = (P[2][0], P[0][0], P[1][0])
+                '''
+
         if options.angle:
             (y,p,r) = sensor.yaw_pitch_roll()
             data = tuple((p, y, r)) + position
