@@ -185,7 +185,8 @@ if ep:
 
 	# Control 'Cinematic Screen' params
 	if options.size or options.dist or options.mist \
-			or options.bright or options.hdmi:
+			or options.bright or options.hdmi \
+			or options.lock:
 		# Limit size/dist/etc
 		if options.size:
 			if options.size > 100:
